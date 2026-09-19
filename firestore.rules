@@ -21,24 +21,6 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // ============ AUFGETEILTE DATENSÄTZE (ein Dokument PRO Eintrag) ============
-    // Die App teilt die drei wachsenden/konkurrierenden Datensätze auf (siehe index.html,
-    // MULTI_DOC_KEYS), damit parallele Teilnehmer sich nicht gegenseitig überschreiben
-    // und kein Einzeldokument die 1-MiB-Grenze erreicht. Diese Aufteilung ist PFLEGE-
-    // BESTANDTEIL — die Regeln müssen die neuen Collections zwingend freigeben:
-    //   Patienten   ->  app_patients/{patientId}
-    //   Übungen     ->  app_exercises/{exerciseId}
-    //   Sichtungen  ->  app_sichtungen/{exerciseId}/records/{docId}
-    match /app_patients/{patientId} {
-      allow read, write: if true;
-    }
-    match /app_exercises/{exerciseId} {
-      allow read, write: if true;
-    }
-    match /app_sichtungen/{exerciseId}/records/{docId} {
-      allow read, write: if true;
-    }
-
     // Alles andere (falls in Zukunft weitere Collections entstehen) bleibt gesperrt.
     match /{document=**} {
       allow read, write: if false;

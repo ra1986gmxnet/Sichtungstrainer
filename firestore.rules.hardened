@@ -27,21 +27,6 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Aufgeteilte Datensätze (ein Dokument PRO Eintrag, siehe index.html "MULTI_DOC_KEYS"):
-    //   Patienten   ->  app_patients/{patientId}
-    //   Übungen     ->  app_exercises/{exerciseId}
-    //   Sichtungen  ->  app_sichtungen/{exerciseId}/records/{docId}
-    // Diese erlauben KEINEN Zugriff auf appdata/users (das bleibt oben gesperrt).
-    match /app_patients/{patientId} {
-      allow read, write: if true;
-    }
-    match /app_exercises/{exerciseId} {
-      allow read, write: if true;
-    }
-    match /app_sichtungen/{exerciseId}/records/{docId} {
-      allow read, write: if true;
-    }
-
     match /{document=**} {
       allow read, write: if false;
     }
