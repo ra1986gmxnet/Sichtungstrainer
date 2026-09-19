@@ -153,7 +153,6 @@
 
 <script>
 // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -167,8 +166,9 @@ const firebaseConfig = {
   appId: "1:175542139942:web:43add6cb59e21da4b53ae7"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase (compat)
+const app = firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore(app);
 
 
 /* ====================== STORAGE HELPERS ======================
@@ -556,6 +556,8 @@ const St = {
   reveal:{},           // fieldKey -> true, reset per patient view
   timer:{active:false,field:null,remaining:0,intervalId:null},
   adminTab:'patienten',
+  zertifikate:[],
+  zertifikate:[],
   cockpitLog:[],
   aiBusy:false,
   aiProgress:'',
@@ -793,6 +795,7 @@ async function init(){
     await saveKey('patients', St.patients);
   }
   St.exercises = await loadKey('exercises', []);
+  St.zertifikate = await loadKey('zertifikate', []);
   const sichtRaw = await loadKey('sichtungen_index', {});
   St.sichtungen = sichtRaw;
 
@@ -2456,7 +2459,12 @@ async function refreshUsersFromApi(){
   St.users = fresh;
   return true;
 }
-async function goAdminTab(tab){
+async function goCertAdmin(){
+  St.route = 'admin';
+  St.adminTab = 'zertifikate';
+  render();
+}
+function goAdminTab(tab){
   St.adminTab = tab;
   render();
   if(tab==='nutzer'){
@@ -2876,6 +2884,7 @@ function topbar(){
     <div class="who">
       <span class="badge-role">${esc(St.user.username)} · ${esc(St.user.role)}</span>
       ${St.currentExerciseId && St.route!=='exercises' ? `<button class="btn btn-sm" onclick="go('exercises')">Übungen</button>`:''}
+      ${(St.user.role==='admin'||St.user.role==='uebungsleiter') ? `<button class="btn btn-sm" onclick="goCertAdmin()">🎓 Zertifikate</button>`:''}
       <button class="btn btn-sm btn-ghost" onclick="logout()">Abmelden</button>
     </div>
   </div>`;
@@ -3676,6 +3685,8 @@ async function issueCertificate(rowId, mode){
   }
 
   if(mode==='email'){
+    St.zertifikate.unshift({id:uid(), name:row.name, vorname:row.vorname, email:row.email, ausstellungsdatum:new Date().toISOString(), aussteller:St.user.username, uebung:ex?ex.name:''});
+    await saveKey('zertifikate', St.zertifikate);
     toast('Zertifikat wurde an '+row.email+' gesendet');
   }else{
     // Base64-PDF in einen Blob umwandeln und im bereits geöffneten Tab anzeigen
@@ -3687,7 +3698,9 @@ async function issueCertificate(rowId, mode){
       const url = URL.createObjectURL(blob);
       if(printWin){
         printWin.location.href = url;
-        toast('Zertifikat erzeugt – im geöffneten Tab drucken/speichern');
+        St.zertifikate.unshift({id:uid(), name:row.name, vorname:row.vorname, email:row.email, ausstellungsdatum:new Date().toISOString(), aussteller:St.user.username, uebung:ex?ex.name:''});
+    await saveKey('zertifikate', St.zertifikate);
+    toast('Zertifikat erzeugt – im geöffneten Tab drucken/speichern');
       }else{
         // Fenster wurde trotzdem blockiert (z.B. strikte Browser-/Erweiterungs-Einstellung):
         // sichtbaren Link als Fallback anbieten, statt stillschweigend nichts zu tun.
@@ -3707,6 +3720,72 @@ async function issueCertificate(rowId, mode){
       if(printWin) printWin.close();
     }
   }
+}
+
+function adminCertificates(){
+  const ex = St.exercises.find(e=>e.id===St.currentExerciseId);
+  const canDelete = St.user.role==='admin';
+  const q = (St.certQuery||'').toLowerCase();
+  // Chronologische Liste aller ausgestellten Zertifikate (St.zertifikate). Default-Sortierung
+  // chronologisch (neueste zuerst), umschaltbar auf alphabetisch nach Name.
+  let rows = (St.zertifikate||[]).slice();
+  if(q){
+    rows = rows.filter(z=>(z.vorname||'').toLowerCase().includes(q) || (z.name||'').toLowerCase().includes(q) || (z.aussteller||'').toLowerCase().includes(q));
+  }
+  if(St.certSort==='alpha'){
+    rows.sort((a,b)=>(a.name||'').localeCompare(b.name||'') || (a.vorname||'').localeCompare(b.vorname||''));
+  }else{
+    // chronologisch nach Ausstellungsdatum (Datum+Uhrzeit+Timestamp — neueste zuerst)
+    rows.sort((a,b)=>b.ts-(a.ts||0));
+  }
+  const listRows = rows.map(z=>`
+    <tr>
+      <td>${esc(z.datum)}</td>
+      <td>${esc(z.vorname||'')}</td>
+      <td>${esc(z.name||'')}</td>
+      <td>${esc(z.email||'')}</td>
+      <td>${esc(z.aussteller||'')}</td>
+      <td>${esc(z.uebung||'')}</td>
+      <td>${canDelete?`<button class="btn btn-sm btn-danger" onclick="deleteCertificate('${z.id}')">🗑 Löschen</button>`:'<span class="small">—</span>'}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="empty">Noch keine Zertifikate ausgestellt</td></tr>';
+
+  const exOptions = St.exercises.map(e=>`<option value="${e.id}" ${e.id===St.currentExerciseId?'selected':''}>${esc(e.name)} · ${esc(e.datum||'')} ${esc(e.ort||'')}</option>`).join('');
+  const sortBar = `
+    <div class="flex-between" style="margin-bottom:10px;">
+      <input id="cert-suche" placeholder="🔍 Suche (Name · Vorname · Aussteller)…" value="${esc(St.certQuery||'')}" oninput="St.certQuery=this.value;render()" style="flex:1;margin-right:8px;">
+      <div>
+        <button class="btn btn-sm ${St.certSort!=='alpha'?'btn-primary':''}" onclick="St.certSort='';render()">🕒 Chronologisch</button>
+        <button class="btn btn-sm ${St.certSort==='alpha'?'btn-primary':''}" onclick="St.certSort='alpha';render()">🔤 Alphabetisch</button>
+      </div>
+    </div>`;
+
+  return `
+  <div class="wrap">
+    <div class="card" style="margin-top:14px;border-left:5px solid var(--yellow);">
+      <div class="section-title" style="margin-top:0;">🎓 Neues Zertifikat ausstellen</div>
+      <p class="small">Wähle eine Übung, um für deren Teilnehmer Zertifikate zu erstellen (Formular wie gehabt, per E-Mail oder zum Ausdrucken).</p>
+      <div class="row">
+        <div class="field"><label>Übung</label>
+          <select id="cert-ex-select" onchange="St.currentExerciseId=this.value;render()">${exOptions}</select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="openCertificates(St.currentExerciseId)">🎓 Zertifikate für diese Übung ausstellen</button>
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <div class="section-title" style="margin-top:0;">Archiv · Ausgestellt (${rows.length})</div>
+      ${sortBar}
+      <table><thead><tr><th>Ausstellungsdatum</th><th>Vorname</th><th>Name</th><th>E-Mail</th><th>Ausgestellt von</th><th>Übung</th><th></th></tr></thead>
+      <tbody>${listRows}</tbody></table>
+    </div>
+  </div>`;
+}
+
+function deleteCertificate(certId){
+  if(St.user.role!=='admin'){ toast('Nur Admins dürfen Zertifikate löschen'); return; }
+  if(!confirm('Zertifikat wirklich aus dem Archiv löschen?')) return;
+  St.zertifikate = (St.zertifikate||[]).filter(z=>z.id!==certId);
+  saveKey('zertifikate', St.zertifikate);
+  render();
 }
 
 function viewCertificates(){
@@ -3837,7 +3916,6 @@ function viewCockpit(){
       <button class="btn" onclick="exportExercisePdf('${ex.id}')">📄 PDF-Bericht erzeugen</button>
       <button class="btn" onclick="openExerciseEditModal('${ex.id}')">⚙ Übung bearbeiten</button>
       <button class="btn btn-danger" onclick="resetExercise('${ex.id}')">🔄 Zurücksetzen</button>
-      <button class="btn" onclick="openCertificates('${ex.id}')">🎓 Zertifikate</button>
     </div>
     <div class="card">
       <p>Gesichtete Patienten: <b>${list.filter(r=>r.kategorie).length}</b> von ${(ex.patientIds&&ex.patientIds.length)?ex.patientIds.length:St.patients.length}${ex.modus==='qr'?' (Planwert: '+(ex.patientCount||'-')+')':''}</p>
@@ -3851,13 +3929,19 @@ function viewCockpit(){
 
 /* ====================== RENDER: ADMIN ====================== */
 function viewAdmin(){
-  const tabs = ['patienten','nutzer','uebungen'];
-  const tabLabels = {patienten:'Patientendatenbank', nutzer:'Nutzerübersicht', uebungen:'Übungen'};
+  const isCertAllowed = St.user.role==='admin' || St.user.role==='uebungsleiter';
+  // Übungsleiter dürfen AUSSCHLIESSLICH den Zertifikate-Reiter sehen (keine
+  // Patientendatenbank/Nutzerverwaltung). Admins sehen alle vier Reiter.
+  const tabs = St.user.role==='uebungsleiter' ? ['zertifikate'] : ['patienten','nutzer','uebungen','zertifikate'];
+  const tabLabels = {patienten:'Patientendatenbank', nutzer:'Nutzerübersicht', uebungen:'Übungen', zertifikate:'🎓 Zertifikate'};
+  if(St.user.role==='uebungsleiter' && St.adminTab!=='zertifikate'){ St.adminTab = 'zertifikate'; }
   const tabBar = tabs.map(t=>`<div class="tab ${St.adminTab===t?'active':''}" onclick="goAdminTab('${t}')">${tabLabels[t]}</div>`).join('');
   let content = '';
   if(St.adminTab==='patienten') content = adminPatients();
   if(St.adminTab==='nutzer') content = adminUsers();
   if(St.adminTab==='uebungen') content = adminExercises();
+  if(St.adminTab==='zertifikate' && isCertAllowed) content = adminCertificates();
+  if(St.adminTab==='zertifikate' && !isCertAllowed){ St.adminTab='patienten'; content = adminPatients(); }
   return `<div class="wrap"><h1>Admin-Bereich</h1><div class="tabs">${tabBar}</div>${content}</div>`;
 }
 
@@ -4134,7 +4218,7 @@ function render(){
     // Zusätzliche Absicherung: Admin-Bereich (inkl. KI-Patientengenerierung) ist
     // ausschließlich für die Rolle "admin" zugänglich, auch wenn St.route manuell
     // (z.B. über die Browser-Konsole) auf 'admin' gesetzt würde.
-    if(St.route==='admin' && St.user.role!=='admin'){ St.route='exercises'; }
+    if(St.route==='admin' && St.user.role!=='admin' && St.user.role!=='uebungsleiter'){ St.route='exercises'; }
     // Im QR-Scan-Modus (Variante 1) ist die Patientenübersicht grundsätzlich nicht erreichbar —
     // Teilnehmer gelangen ausschließlich über das Scannen der QR-Codes zu einem Patienten.
     if(St.route==='patients'){
