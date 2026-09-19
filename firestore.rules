@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Die App speichert alle Daten (Nutzer, Patienten, Übungen, Sichtungen) als
+    // einzelne Dokumente in der Collection "appdata". Da die App ein eigenes,
+    // einfaches Login (Benutzername/Passwort in Firestore) statt "Firebase
+    // Authentication" nutzt, kann hier NICHT nach einzelnen App-Nutzern
+    // unterschieden werden.
+    //
+    // WICHTIG / SICHERHEITSHINWEIS (siehe auch DEPLOYMENT.md):
+    // Diese Regeln erlauben JEDEM mit der Firebase-Projektkonfiguration
+    // (die im Quelltext der Webseite sichtbar ist) Lese- und Schreibzugriff
+    // auf die Datenbank — auch außerhalb der App, z.B. über die Firebase-
+    // Konsole oder eigene Skripte. Für eine interne Übung mit vertrauens-
+    // würdigen Teilnehmern ist das ein vertretbarer Kompromiss. Für einen
+    // Einsatz mit sensiblen oder öffentlich zugänglichen Daten sollte
+    // stattdessen "Firebase Authentication" eingeführt und diese Regeln
+    // entsprechend verschärft werden.
+    match /appdata/{document} {
+      allow read, write: if true;
+    }
+
+    // ============ AUFGETEILTE DATENSÄTZE (ein Dokument PRO Eintrag) ============
+    // Die App teilt die drei wachsenden/konkurrierenden Datensätze auf (siehe index.html,
+    // MULTI_DOC_KEYS), damit parallele Teilnehmer sich nicht gegenseitig überschreiben
+    // und kein Einzeldokument die 1-MiB-Grenze erreicht. Diese Aufteilung ist PFLEGE-
+    // BESTANDTEIL — die Regeln müssen die neuen Collections zwingend freigeben:
+    //   Patienten   ->  app_patients/{patientId}
+    //   Übungen     ->  app_exercises/{exerciseId}
+    //   Sichtungen  ->  app_sichtungen/{exerciseId}/records/{docId}
+    match /app_patients/{patientId} {
+      allow read, write: if true;
+    }
+    match /app_exercises/{exerciseId} {
+      allow read, write: if true;
+    }
+    match /app_sichtungen/{exerciseId}/records/{docId} {
+      allow read, write: if true;
+    }
+
+    // Alles andere (falls in Zukunft weitere Collections entstehen) bleibt gesperrt.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
